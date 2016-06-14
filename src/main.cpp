@@ -1,405 +1,330 @@
-//
-// Created by Sergei Silnov <po@kumekay.com> on 9.6.16.
-//
-
+#include <FS.h>
 #include <Arduino.h>
+#include <ESP8266WiFi.h>          //https://github.com/esp8266/Arduino
 
-/*********************************************************************
-This is an example sketch for our Monochrome Nokia 5110 LCD Displays
+// Wifi Manager
+#include <DNSServer.h>
+#include <ESP8266WebServer.h>
+#include <WiFiManager.h>         //https://github.com/tzapu/WiFiManager
 
-  Pick one up today in the adafruit shop!
-  ------> http://www.adafruit.com/products/338
+// HTTP requests
+#include <ESP8266HTTPClient.h>
 
-These displays use SPI to communicate, 4 or 5 pins are required to
-interface
+// OTA updates
+#include <ESP8266httpUpdate.h>
+// Blynk
+#include <BlynkSimpleEsp8266.h>
 
-Adafruit invests time and resources providing this open source code,
-please support Adafruit and open-source hardware by purchasing
-products from Adafruit!
+// JSON
+#include <ArduinoJson.h>          //https://github.com/bblanchon/ArduinoJson
 
-Written by Limor Fried/Ladyada  for Adafruit Industries.
-BSD license, check license.txt for more information
-All text above, and the splash screen must be included in any redistribution
-*********************************************************************/
+// Use I2C
+#define I2C_SDA 2
+#define I2C_SCL 14
 
-#include <SPI.h>
-#include <Adafruit_GFX.h>
-#include <PCD8544.h>
+#include <Wire.h>
 
-// Software SPI (slower updates, more flexible pin options):
-// pin 7 - Serial clock out (SCLK)
-// pin 6 - Serial data out (DIN)
-// pin 5 - Data/Command select (D/C)
-// pin 4 - LCD chip select (CS)
-// pin 3 - LCD reset (RST)
-// Adafruit_PCD8544 display = Adafruit_PCD8544(7, 6, 5, 4, 3);
+// Pressure and Temperature
+#include <Adafruit_BMP085.h>
 
-// Hardware SPI (faster, but must use certain hardware pins):
-// SCK is LCD serial clock (SCLK) - this is pin 13 on Arduino Uno
-// MOSI is LCD DIN - this is pin 11 on an Arduino Uno
-// pin 5 - Data/Command select (D/C)
-// pin 4 - LCD chip select (CS)
-// pin 3 - LCD reset (RST)
-// Adafruit_PCD8544 display = Adafruit_PCD8544(5, 4, 3);
-// Note with hardware SPI MISO and SS pins aren't used but will still be read
-// and written to during SPI transfer.  Be careful sharing these pins!
+// Use TFT_ILI9163C display library
+#include <TFT_ILI9163C.h>
 
-/******************************************************************
-ESP8266 with PCD8544 display
+// Temperature and Humidity
+#include "DHT.h" // https://github.com/adafruit/DHT-sensor-library
 
-== Parts ==
+// Handy timers
+#include <SimpleTimer.h>
 
-* Adafruit Huzzah ESP8266 https://www.adafruit.com/products/2471
+// dht sensor
+#define DHTPIN 12
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE, 15);
 
-* Adafruit PCD8544/5110 display https://www.adafruit.com/product/338
+// Pressure and temperature sensor
+Adafruit_BMP085 bmp;
 
-* Adafruit USB to TTL serial cable https://www.adafruit.com/products/954
+// Serial management
+#define DATA_SERIAL Serial
+#define SENSOR_SERIAL Serial
 
-== Connection ==
+// lcd
+#define __CS  16  //(D0)
+#define __DC  5   //(D1)
+#define __RST 4   //(D2)
 
-USB TTL     Huzzah      Nokia 5110  Description
-            ESP8266     PCD8544
+/*
+ SCLK:D5
+ MOSI:D7
+*/
 
-            GND         GND         Ground
-            3V          VCC         3.3V from Huzzah to display
-            14          CLK         Output from ESP SPI clock
-            13          DIN         Output from ESP SPI MOSI to display data input
-            12          D/C         Output from display data/command to ESP
-            #5          CS          Output from ESP to chip select/enable display
-            #4          RST         Output from ESP to reset display
-                        LED         3.3V to turn backlight on
-
-GND (blk)   GND                     Ground
-5V  (red)   V+                      5V power from PC or charger
-TX  (green) RX                      Serial data from IDE to ESP
-RX  (white) TX                      Serial data to ESP from IDE
-******************************************************************/
-
-// ESP8266 Software SPI (slower updates, more flexible pin options):
-// pin 14 - Serial clock out (SCLK)
-// pin 13 - Serial data out (DIN)
-// pin 12 - Data/Command select (D/C)
-// pin 5 - LCD chip select (CS)
-// pin 4 - LCD reset (RST)
-//Adafruit_PCD8544 display = Adafruit_PCD8544(14, 13, 12, 5, 4);
-
-// If using an ESP8266, use this option. Comment out the other options.
-// ESP8266 Hardware SPI (faster, but must use certain hardware pins):
-// SCK is LCD serial clock (SCLK) - this is pin 14 on Huzzah ESP8266
-// MOSI is LCD DIN - this is pin 13 on an Huzzah ESP8266
-// pin 12 - Data/Command select (D/C) on an Huzzah ESP8266
-// pin 5 - LCD chip select (CS)
-// pin 4 - LCD reset (RST)
-
-Adafruit_PCD8544 display = Adafruit_PCD8544(12, 5, 4);
-
-#define NUMFLAKES 10
-#define XPOS 0
-#define YPOS 1
-#define DELTAY 2
+TFT_ILI9163C lcd = TFT_ILI9163C(__CS, __DC, __RST);
 
 
-#define LOGO16_GLCD_HEIGHT 16
-#define LOGO16_GLCD_WIDTH  16
+// Blynk token
+char blynk_token[33]{"Blynk token"};
+const char blynk_domain[]{"ezagro.kumekay.com"};
+const uint16_t blynk_port{8442};
 
-static const unsigned char PROGMEM logo16_glcd_bmp[] =
-{ B00000000, B11000000,
-B00000001, B11000000,
-B00000001, B11000000,
-B00000011, B11100000,
-B11110011, B11100000,
-B11111110, B11111000,
-B01111110, B11111111,
-B00110011, B10011111,
-B00011111, B11111100,
-B00001101, B01110000,
-B00011011, B10100000,
-B00111111, B11100000,
-B00111111, B11110000,
-B01111100, B11110000,
-B01110000, B01110000,
-B00000000, B00110000 };
+// Device Id
+char device_id[17] = "Device ID";
+char fw_ver[17] = "v0.0.4";
 
-void setup()   {
-    Serial.begin(9600);
+// Handy timer
+SimpleTimer timer;
 
-    display.begin();
-    // init done
+// Setup Wifi connection
+WiFiManager wifiManager;
 
-    // you can change the contrast around to adapt the display
-    // for the best viewing!
-    display.setContrast(50);
+//flag for saving data
+bool shouldSaveConfig = false;
 
-    display.display(); // show splashscreen
-    delay(2000);
-    display.clearDisplay();   // clears the screen and buffer
-
-    // draw a single pixel
-    display.drawPixel(10, 10, BLACK);
-    display.display();
-    delay(2000);
-    display.clearDisplay();
-
-    // draw many lines
-    testdrawline();
-    display.display();
-    delay(2000);
-    display.clearDisplay();
-
-    // draw rectangles
-    testdrawrect();
-    display.display();
-    delay(2000);
-    display.clearDisplay();
-
-    // draw multiple rectangles
-    testfillrect();
-    display.display();
-    delay(2000);
-    display.clearDisplay();
-
-    // draw mulitple circles
-    testdrawcircle();
-    display.display();
-    delay(2000);
-    display.clearDisplay();
-
-    // draw a circle, 10 pixel radius
-    display.fillCircle(display.width()/2, display.height()/2, 10, BLACK);
-    display.display();
-    delay(2000);
-    display.clearDisplay();
-
-    testdrawroundrect();
-    delay(2000);
-    display.clearDisplay();
-
-    testfillroundrect();
-    delay(2000);
-    display.clearDisplay();
-
-    testdrawtriangle();
-    delay(2000);
-    display.clearDisplay();
-
-    testfilltriangle();
-    delay(2000);
-    display.clearDisplay();
-
-    // draw the first ~12 characters in the font
-    testdrawchar();
-    display.display();
-    delay(2000);
-    display.clearDisplay();
-
-    // text display tests
-    display.setTextSize(1);
-    display.setTextColor(BLACK);
-    display.setCursor(0,0);
-    display.println("Hello, world!");
-    display.setTextColor(WHITE, BLACK); // 'inverted' text
-    display.println(3.141592);
-    display.setTextSize(2);
-    display.setTextColor(BLACK);
-    display.print("0x"); display.println(0xDEADBEEF, HEX);
-    display.display();
-    delay(2000);
-
-    // rotation example
-    display.clearDisplay();
-    display.setRotation(1);  // rotate 90 degrees counter clockwise, can also use values of 2 and 3 to go further.
-    display.setTextSize(1);
-    display.setTextColor(BLACK);
-    display.setCursor(0,0);
-    display.println("Rotation");
-    display.setTextSize(2);
-    display.println("Example!");
-    display.display();
-    delay(2000);
-
-    // revert back to no rotation
-    display.setRotation(0);
-
-    // miniature bitmap display
-    display.clearDisplay();
-    display.drawBitmap(30, 16,  logo16_glcd_bmp, 16, 16, 1);
-    display.display();
-
-    // invert the display
-    display.invertDisplay(true);
-    delay(1000);
-    display.invertDisplay(false);
-    delay(1000);
-
-    // draw a bitmap icon and 'animate' movement
-    testdrawbitmap(logo16_glcd_bmp, LOGO16_GLCD_WIDTH, LOGO16_GLCD_HEIGHT);
+//callback notifying the need to save config
+void saveConfigCallback() {
+    DATA_SERIAL.println("Should save config");
+    shouldSaveConfig = true;
 }
 
+void factoryReset() {
+    wifiManager.resetSettings();
+    SPIFFS.format();
+    ESP.reset();
+}
+
+void sendMeasurements() {
+    auto h = String(dht.readHumidity(), 0);
+    auto t = String(dht.readTemperature(), 0);
+
+    auto t2 = String(bmp.readTemperature(), 0);
+    auto p = String(bmp.readPressure(), 0);
+
+//    auto co2 = String(readCO2Level(), 0);
+
+    // Send data to Blynk
+    Blynk.virtualWrite(V1, h);
+    Blynk.virtualWrite(V2, t);
+//    Blynk.virtualWrite(V3, t2);
+//    Blynk.virtualWrite(V4, p);
+//    Blynk.virtualWrite(V5, co2);
+
+//    // Clear LCD
+//    lcd.clear();
+//
+//    // add logo
+    lcd.setCursor(2, 2);
+    lcd.print(device_id);
+    lcd.print(" ");
+    lcd.println(fw_ver);
+
+    // Print data
+    const char rows {2};
+    String row[rows] {"H: " + h + "% T: " + t + "C",
+    "P: " + p + "Pa T: " + t2 + "C"};
+    for (char i=0; i < rows; i++) {
+        lcd.println(row[i]);
+        DATA_SERIAL.println(row[i]);
+    }
+}
+
+//void showData() {
+//
+//}
+
+// Source http://www.winsen-sensor.com/d/files/infrared-gas-sensor/mh-z19/mh-z19-co2-manual(ver1_0).pdf
+bool getCheckSum(char *packet) {
+    char checksum{0xFF};
+    for (char i = 1; i < 8; i++)
+        checksum -= packet[i];
+
+    checksum++;
+
+    return packet[8] == checksum;
+}
+
+int readCO2Level() {
+    const char request[9]{0xFF, 0x01, 0x86, 0x00, 0x00, 0x00, 0x00, 0x00, 0x79};
+    char response[9];
+
+    SENSOR_SERIAL.write(request, 9);
+    SENSOR_SERIAL.readBytes(response, 9);
+
+    if (getCheckSum(response)) {
+        int ppm = (256 * response[2]) + response[3];
+        DATA_SERIAL.println("CO2 Level: " + String(ppm) + "ppm");
+        return ppm;
+    } else {
+        DATA_SERIAL.println("CO2 Sensor CRC error!");
+        return -1;
+    }
+}
+
+bool loadConfig() {
+    File configFile = SPIFFS.open("/config.json", "r");
+    if (!configFile) {
+        DATA_SERIAL.println("Failed to open config file");
+        return false;
+    }
+
+    size_t size = configFile.size();
+    if (size > 1024) {
+        DATA_SERIAL.println("Config file size is too large");
+        return false;
+    }
+
+    // Allocate a buffer to store contents of the file.
+    std::unique_ptr<char[]> buf(new char[size]);
+
+    // We don't use String here because ArduinoJson library requires the input
+    // buffer to be mutable. If you don't use ArduinoJson, you may as well
+    // use configFile.readString instead.
+    configFile.readBytes(buf.get(), size);
+
+    StaticJsonBuffer<200> jsonBuffer;
+    JsonObject &json = jsonBuffer.parseObject(buf.get());
+
+    if (!json.success()) {
+        DATA_SERIAL.println("Failed to parse config file");
+        return false;
+    }
+
+    // Save parameters
+    strcpy(device_id, json["device_id"]);
+    strcpy(blynk_token, json["blynk_token"]);
+}
+
+void setupWiFi() {
+    //set config save notify callback
+    wifiManager.setSaveConfigCallback(saveConfigCallback);
+
+    // Custom parameters
+    WiFiManagerParameter custom_device_id("device_id", "Device ID", device_id, 16);
+    WiFiManagerParameter custom_blynk_token("blynk", "Blynk token", blynk_token, 34);
+    wifiManager.addParameter(&custom_blynk_token);
+    wifiManager.addParameter(&custom_device_id);
+
+    // lcd.clear();
+
+    // add logo
+    lcd.setCursor(0, 0);
+    lcd.print("Connect to WiFi:");
+    lcd.setCursor(0, 1);
+    lcd.print("EZagro ezsecret");
+
+    // wifiManager.setTimeout(180);
+    if (!wifiManager.autoConnect("EZagro", "ezsecret")) {
+        DATA_SERIAL.println("failed to connect and hit timeout");
+        delay(3000);
+        //reset and try again, or maybe put it to deep sleep
+        ESP.reset();
+        delay(5000);
+    }
+
+    //save the custom parameters to FS
+    if (shouldSaveConfig) {
+        DATA_SERIAL.println("saving config");
+        DynamicJsonBuffer jsonBuffer;
+        JsonObject &json = jsonBuffer.createObject();
+        json["device_id"] = custom_device_id.getValue();
+        json["blynk_token"] = custom_blynk_token.getValue();
+
+        File configFile = SPIFFS.open("/config.json", "w");
+        if (!configFile) {
+            DATA_SERIAL.println("failed to open config file for writing");
+        }
+
+        json.printTo(DATA_SERIAL);
+        json.printTo(configFile);
+        configFile.close();
+        //end save
+    }
+
+    //if you get here you have connected to the WiFi
+    DATA_SERIAL.println("WiFi connected");
+
+    DATA_SERIAL.print("IP address: ");
+    DATA_SERIAL.println(WiFi.localIP());
+}
+
+void wifiModeCallback(WiFiManager *myWiFiManager) {
+    DATA_SERIAL.println("Entered config mode");
+    DATA_SERIAL.println(WiFi.softAPIP());
+}
+
+// Virtual pin update FW
+BLYNK_WRITE(V22) {
+    if (param.asInt() == 1) {
+        DATA_SERIAL.println("Got a FW update request");
+
+        char full_version[34]{""};
+        strcat(full_version, device_id);
+        strcat(full_version, "::");
+        strcat(full_version, fw_ver);
+
+        t_httpUpdate_return ret = ESPhttpUpdate.update("http://firmware.ezagro.kumekay.com/update", full_version);
+        switch (ret) {
+            case HTTP_UPDATE_FAILED:
+                DATA_SERIAL.println("[update] Update failed.");
+                break;
+            case HTTP_UPDATE_NO_UPDATES:
+                DATA_SERIAL.println("[update] Update no Update.");
+                break;
+            case HTTP_UPDATE_OK:
+                DATA_SERIAL.println("[update] Update ok.");
+                break;
+        }
+
+    }
+}
+
+// Virtual pin reset settings
+BLYNK_WRITE(V23) {
+    factoryReset();
+}
+
+void setup() {
+    // Init serial port
+    DATA_SERIAL.begin(115200);
+
+    // Init I2C interface
+    Wire.begin(I2C_SDA, I2C_SCL);
+
+    // Init Humidity/Temperature sensor
+    dht.begin();
+
+    // Init Pressure/Temperature sensor
+    if (!bmp.begin()) {
+        DATA_SERIAL.println("Could not find a valid BMP085 sensor, check wiring!");
+    }
+
+    // Init LCD display
+    lcd.begin();
+
+
+    // Init filesystem
+    if (!SPIFFS.begin()) {
+        DATA_SERIAL.println("Failed to mount file system");
+        ESP.reset();
+    }
+
+    // Setup WiFi
+    setupWiFi();
+
+    // Load config
+    if (!loadConfig()) {
+        DATA_SERIAL.println("Failed to load config");
+        factoryReset();
+    } else {
+        DATA_SERIAL.println("Config loaded");
+    }
+
+    // Start blynk
+    Blynk.config(blynk_token, blynk_domain, blynk_port);
+
+    // Setup a function to be called every 5 second
+    timer.setInterval(10000L, sendMeasurements);
+}
 
 void loop() {
-
-}
-
-
-void testdrawbitmap(const uint8_t *bitmap, uint8_t w, uint8_t h) {
-    uint8_t icons[NUMFLAKES][3];
-    randomSeed(666);     // whatever seed
-
-    // initialize
-    for (uint8_t f=0; f< NUMFLAKES; f++) {
-        icons[f][XPOS] = random(display.width());
-        icons[f][YPOS] = 0;
-        icons[f][DELTAY] = random(5) + 1;
-
-        Serial.print("x: ");
-        Serial.print(icons[f][XPOS], DEC);
-        Serial.print(" y: ");
-        Serial.print(icons[f][YPOS], DEC);
-        Serial.print(" dy: ");
-        Serial.println(icons[f][DELTAY], DEC);
-    }
-
-    while (1) {
-        // draw each icon
-        for (uint8_t f=0; f< NUMFLAKES; f++) {
-            display.drawBitmap(icons[f][XPOS], icons[f][YPOS], logo16_glcd_bmp, w, h, BLACK);
-        }
-        display.display();
-        delay(200);
-
-        // then erase it + move it
-        for (uint8_t f=0; f< NUMFLAKES; f++) {
-            display.drawBitmap(icons[f][XPOS], icons[f][YPOS],  logo16_glcd_bmp, w, h, WHITE);
-            // move it
-            icons[f][YPOS] += icons[f][DELTAY];
-            // if its gone, reinit
-            if (icons[f][YPOS] > display.height()) {
-                icons[f][XPOS] = random(display.width());
-                icons[f][YPOS] = 0;
-                icons[f][DELTAY] = random(5) + 1;
-            }
-        }
-    }
-}
-
-
-void testdrawchar(void) {
-    display.setTextSize(1);
-    display.setTextColor(BLACK);
-    display.setCursor(0,0);
-
-    for (uint8_t i=0; i < 168; i++) {
-        if (i == '\n') continue;
-        display.write(i);
-        //if ((i > 0) && (i % 14 == 0))
-        //display.println();
-    }
-    display.display();
-}
-
-void testdrawcircle(void) {
-    for (int16_t i=0; i<display.height(); i+=2) {
-        display.drawCircle(display.width()/2, display.height()/2, i, BLACK);
-        display.display();
-    }
-}
-
-void testfillrect(void) {
-    uint8_t color = 1;
-    for (int16_t i=0; i<display.height()/2; i+=3) {
-        // alternate colors
-        display.fillRect(i, i, display.width()-i*2, display.height()-i*2, color%2);
-        display.display();
-        color++;
-    }
-}
-
-void testdrawtriangle(void) {
-    for (int16_t i=0; i<min(display.width(),display.height())/2; i+=5) {
-        display.drawTriangle(display.width()/2, display.height()/2-i,
-                             display.width()/2-i, display.height()/2+i,
-                             display.width()/2+i, display.height()/2+i, BLACK);
-        display.display();
-    }
-}
-
-void testfilltriangle(void) {
-    uint8_t color = BLACK;
-    for (int16_t i=min(display.width(),display.height())/2; i>0; i-=5) {
-        display.fillTriangle(display.width()/2, display.height()/2-i,
-                             display.width()/2-i, display.height()/2+i,
-                             display.width()/2+i, display.height()/2+i, color);
-        if (color == WHITE) color = BLACK;
-        else color = WHITE;
-        display.display();
-    }
-}
-
-void testdrawroundrect(void) {
-    for (int16_t i=0; i<display.height()/2-2; i+=2) {
-        display.drawRoundRect(i, i, display.width()-2*i, display.height()-2*i, display.height()/4, BLACK);
-        display.display();
-    }
-}
-
-void testfillroundrect(void) {
-    uint8_t color = BLACK;
-    for (int16_t i=0; i<display.height()/2-2; i+=2) {
-        display.fillRoundRect(i, i, display.width()-2*i, display.height()-2*i, display.height()/4, color);
-        if (color == WHITE) color = BLACK;
-        else color = WHITE;
-        display.display();
-    }
-}
-
-void testdrawrect(void) {
-    for (int16_t i=0; i<display.height()/2; i+=2) {
-        display.drawRect(i, i, display.width()-2*i, display.height()-2*i, BLACK);
-        display.display();
-    }
-}
-
-void testdrawline() {
-    for (int16_t i=0; i<display.width(); i+=4) {
-        display.drawLine(0, 0, i, display.height()-1, BLACK);
-        display.display();
-    }
-    for (int16_t i=0; i<display.height(); i+=4) {
-        display.drawLine(0, 0, display.width()-1, i, BLACK);
-        display.display();
-    }
-    delay(250);
-
-    display.clearDisplay();
-    for (int16_t i=0; i<display.width(); i+=4) {
-        display.drawLine(0, display.height()-1, i, 0, BLACK);
-        display.display();
-    }
-    for (int8_t i=display.height()-1; i>=0; i-=4) {
-        display.drawLine(0, display.height()-1, display.width()-1, i, BLACK);
-        display.display();
-    }
-    delay(250);
-
-    display.clearDisplay();
-    for (int16_t i=display.width()-1; i>=0; i-=4) {
-        display.drawLine(display.width()-1, display.height()-1, i, 0, BLACK);
-        display.display();
-    }
-    for (int16_t i=display.height()-1; i>=0; i-=4) {
-        display.drawLine(display.width()-1, display.height()-1, 0, i, BLACK);
-        display.display();
-    }
-    delay(250);
-
-    display.clearDisplay();
-    for (int16_t i=0; i<display.height(); i+=4) {
-        display.drawLine(display.width()-1, 0, 0, i, BLACK);
-        display.display();
-    }
-    for (int16_t i=0; i<display.width(); i+=4) {
-        display.drawLine(display.width()-1, 0, i, display.height()-1, BLACK);
-        display.display();
-    }
-    delay(250);
+    Blynk.run();
+    timer.run();
 }

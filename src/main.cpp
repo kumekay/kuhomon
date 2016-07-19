@@ -19,8 +19,8 @@
 #include <ArduinoJson.h>          //https://github.com/bblanchon/ArduinoJson
 
 // Use I2C
-#define I2C_SDA 2
-#define I2C_SCL 14
+#define I2C_SDA 9
+#define I2C_SCL 10
 
 #include <Wire.h>
 
@@ -31,15 +31,15 @@
 #include <TFT_ILI9163C.h>
 
 // Temperature and Humidity
-#include "DHT.h" // https://github.com/adafruit/DHT-sensor-library
+//#include "DHT.h" // https://github.com/adafruit/DHT-sensor-library
 
 // Handy timers
 #include <SimpleTimer.h>
 
 // dht sensor
-#define DHTPIN 12
+#define DHTPIN 2
 #define DHTTYPE DHT11
-DHT dht(DHTPIN, DHTTYPE, 15);
+//DHT dht(DHTPIN, DHTTYPE, 15);
 
 // Pressure and temperature sensor
 Adafruit_BMP085 bmp;
@@ -92,8 +92,8 @@ void factoryReset() {
 }
 
 void sendMeasurements() {
-    auto h = String(dht.readHumidity(), 0);
-    auto t = String(dht.readTemperature(), 0);
+//    auto h = String(dht.readHumidity(), 0);
+//    auto t = String(dht.readTemperature(), 0);
 
     auto t2 = String(bmp.readTemperature(), 0);
     auto p = String(bmp.readPressure(), 0);
@@ -101,8 +101,8 @@ void sendMeasurements() {
 //    auto co2 = String(readCO2Level(), 0);
 
     // Send data to Blynk
-    Blynk.virtualWrite(V1, h);
-    Blynk.virtualWrite(V2, t);
+//    Blynk.virtualWrite(V1, h);
+//    Blynk.virtualWrite(V2, t);
 //    Blynk.virtualWrite(V3, t2);
 //    Blynk.virtualWrite(V4, p);
 //    Blynk.virtualWrite(V5, co2);
@@ -111,19 +111,21 @@ void sendMeasurements() {
 //    lcd.clear();
 //
 //    // add logo
-    lcd.setCursor(2, 2);
-    lcd.print(device_id);
-    lcd.print(" ");
-    lcd.println(fw_ver);
+    lcd.clearScreen();
+    lcd.println(String(device_id) + " " + String(fw_ver));
+    DATA_SERIAL.println(String(device_id) + " " + String(fw_ver));
+
+    lcd.println("P: " + p + "Pa T: " + t2 + "C");
+    DATA_SERIAL.println("P: " + p + "Pa T: " + t2 + "C");
 
     // Print data
-    const char rows {2};
-    String row[rows] {"H: " + h + "% T: " + t + "C",
-    "P: " + p + "Pa T: " + t2 + "C"};
-    for (char i=0; i < rows; i++) {
-        lcd.println(row[i]);
-        DATA_SERIAL.println(row[i]);
-    }
+//    const char rows{1};
+//    String row[rows]{ // "H: " + h + "% T: " + t + "C",
+//            "P: " + p + "Pa T: " + t2 + "C"};
+//    for (char i = 0; i < rows; i++) {
+//        lcd.println(row[i]);
+//        DATA_SERIAL.println(row[i]);
+//    }
 }
 
 //void showData() {
@@ -135,9 +137,7 @@ bool getCheckSum(char *packet) {
     char checksum{0xFF};
     for (char i = 1; i < 8; i++)
         checksum -= packet[i];
-
     checksum++;
-
     return packet[8] == checksum;
 }
 
@@ -205,10 +205,8 @@ void setupWiFi() {
     // lcd.clear();
 
     // add logo
-    lcd.setCursor(0, 0);
-    lcd.print("Connect to WiFi:");
-    lcd.setCursor(0, 1);
-    lcd.print("EZagro ezsecret");
+    lcd.println("Connect to WiFi:");
+    lcd.println("EZagro ezsecret");
 
     // wifiManager.setTimeout(180);
     if (!wifiManager.autoConnect("EZagro", "ezsecret")) {
@@ -289,7 +287,7 @@ void setup() {
     Wire.begin(I2C_SDA, I2C_SCL);
 
     // Init Humidity/Temperature sensor
-    dht.begin();
+//    dht.begin();
 
     // Init Pressure/Temperature sensor
     if (!bmp.begin()) {
@@ -307,7 +305,7 @@ void setup() {
     }
 
     // Setup WiFi
-    setupWiFi();
+    // setupWiFi();
 
     // Load config
     if (!loadConfig()) {
@@ -318,13 +316,15 @@ void setup() {
     }
 
     // Start blynk
-    Blynk.config(blynk_token, blynk_domain, blynk_port);
+//    Blynk.config(blynk_token, blynk_domain, blynk_port);
 
-    // Setup a function to be called every 5 second
+    // Setup a function to be called every 10 second
     timer.setInterval(10000L, sendMeasurements);
+
+    sendMeasurements();
 }
 
 void loop() {
-    Blynk.run();
+//    Blynk.run();
     timer.run();
 }

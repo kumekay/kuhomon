@@ -6,11 +6,11 @@ include(CMakeListsPrivate.txt)
 add_definitions(-DF_CPU=80000000L)
 add_definitions(-D__ets__)
 add_definitions(-DICACHE_FLASH)
+add_definitions(-DPLATFORMIO=021001)
 add_definitions(-DESP8266)
 add_definitions(-DARDUINO_ARCH_ESP8266)
-add_definitions(-DARDUINO_ESP8266_NODEMCU)
+add_definitions(-DARDUINO_ESP8266_ESP12)
 add_definitions(-DARDUINO=20200)
-add_definitions(-DPLATFORMIO=020904)
 
 add_custom_target(
     PLATFORMIO_BUILD ALL
@@ -48,8 +48,6 @@ add_custom_target(
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-#
-# To enable code auto-completion, please specify path
-# to main source file (*.c, *.cpp) and uncomment line below
-#
-add_executable(kuhomon src/main.cpp)
+add_executable(kuhomon
+    src/main.cpp
+)

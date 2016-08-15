@@ -19,8 +19,8 @@
 #include <ArduinoJson.h>          //https://github.com/bblanchon/ArduinoJson
 
 // Use I2C
-#define I2C_SDA 9
-#define I2C_SCL 10
+#define I2C_SDA 9 // SD2
+#define I2C_SCL 10 // SD3
 
 #include <Wire.h>
 
@@ -30,32 +30,31 @@
 // Use TFT_ILI9163C display library
 #include <TFT_ILI9163C.h>
 
-// Temperature and Humidity
-//#include "DHT.h" // https://github.com/adafruit/DHT-sensor-library
-
 // Handy timers
 #include <SimpleTimer.h>
 
-// dht sensor
-#define DHTPIN 2
-#define DHTTYPE DHT11
-//DHT dht(DHTPIN, DHTTYPE, 15);
+#include <SoftwareSerial.h>
+
+SoftwareSerial swSerial(5, 4); // Rx, Tx
+
+// CO2 SERIAL
+#define DEBUG_SERIAL Serial
+#define SENSOR_SERIAL swSerial
+
+byte cmd[9] = {0xFF,0x01,0x86,0x00,0x00,0x00,0x00,0x00,0x79};
+unsigned char response[7];
 
 // Pressure and temperature sensor
 Adafruit_BMP085 bmp;
 
-// Serial management
-#define DATA_SERIAL Serial
-#define SENSOR_SERIAL Serial
-
 // lcd
 #define __CS  16  //(D0)
-#define __DC  5   //(D1)
-#define __RST 4   //(D2)
+#define __DC  2   //(D4)
+#define __RST 0   //(D3)
 
 /*
- SCLK:D5
- MOSI:D7
+ SCLK:D5 // GPIO 14
+ MOSI:D7 // GPIO 13
 */
 
 TFT_ILI9163C lcd = TFT_ILI9163C(__CS, __DC, __RST);
@@ -81,7 +80,7 @@ bool shouldSaveConfig = false;
 
 //callback notifying the need to save config
 void saveConfigCallback() {
-    DATA_SERIAL.println("Should save config");
+    DEBUG_SERIAL.println("Should save config");
     shouldSaveConfig = true;
 }
 
@@ -92,82 +91,72 @@ void factoryReset() {
 }
 
 void sendMeasurements() {
-//    auto h = String(dht.readHumidity(), 0);
-//    auto t = String(dht.readTemperature(), 0);
-
     auto t2 = String(bmp.readTemperature(), 0);
     auto p = String(bmp.readPressure(), 0);
 
-//    auto co2 = String(readCO2Level(), 0);
+    Blynk.virtualWrite(V3, t2);
+    Blynk.virtualWrite(V4, p);
 
-    // Send data to Blynk
-//    Blynk.virtualWrite(V1, h);
-//    Blynk.virtualWrite(V2, t);
-//    Blynk.virtualWrite(V3, t2);
-//    Blynk.virtualWrite(V4, p);
-//    Blynk.virtualWrite(V5, co2);
 
-//    // Clear LCD
-//    lcd.clear();
-//
-//    // add logo
+    // CO2
+    String co2 {"---"};
+    bool header_found {false};
+    char tries {0};
+
+    SENSOR_SERIAL.write(cmd, 9);
+    memset(response, 0, 7);
+
+    // Looking for packet start
+    while(SENSOR_SERIAL.available() && (!header_found)) {
+            if(SENSOR_SERIAL.read() == 0xff ) {
+                    if(SENSOR_SERIAL.read() == 0x86 ) header_found = true;
+            }
+    }
+
+    if (header_found) {
+            SENSOR_SERIAL.readBytes(response, 7);
+
+            byte crc = 0x86;
+            for (char i = 0; i < 6; i++) {
+                    crc+=response[i];
+            }
+            crc = 0xff - crc;
+            crc++;
+
+            if ( !(response[6] == crc) ) {
+                    DEBUG_SERIAL.println("CO2: CRC error: " + String(crc) + " / "+ String(response[6]));
+            } else {
+                    unsigned int responseHigh = (unsigned int) response[0];
+                    unsigned int responseLow = (unsigned int) response[1];
+                    unsigned int ppm = (256*responseHigh) + responseLow;
+                    co2 = String(ppm);
+                    DEBUG_SERIAL.println("CO2:" + String(co2));
+            }
+    } else {
+            DEBUG_SERIAL.println("CO2: Header not found");
+    }
+
+    Blynk.virtualWrite(V5, co2);
+
     lcd.clearScreen();
     lcd.println(String(device_id) + " " + String(fw_ver));
-    DATA_SERIAL.println(String(device_id) + " " + String(fw_ver));
+    DEBUG_SERIAL.println(String(device_id) + " " + String(fw_ver));
 
     lcd.println("P: " + p + "Pa T: " + t2 + "C");
-    DATA_SERIAL.println("P: " + p + "Pa T: " + t2 + "C");
+    DEBUG_SERIAL.println("P: " + p + "Pa T: " + t2 + "C");
 
-    // Print data
-//    const char rows{1};
-//    String row[rows]{ // "H: " + h + "% T: " + t + "C",
-//            "P: " + p + "Pa T: " + t2 + "C"};
-//    for (char i = 0; i < rows; i++) {
-//        lcd.println(row[i]);
-//        DATA_SERIAL.println(row[i]);
-//    }
-}
-
-//void showData() {
-//
-//}
-
-// Source http://www.winsen-sensor.com/d/files/infrared-gas-sensor/mh-z19/mh-z19-co2-manual(ver1_0).pdf
-bool getCheckSum(char *packet) {
-    char checksum{0xFF};
-    for (char i = 1; i < 8; i++)
-        checksum -= packet[i];
-    checksum++;
-    return packet[8] == checksum;
-}
-
-int readCO2Level() {
-    const char request[9]{0xFF, 0x01, 0x86, 0x00, 0x00, 0x00, 0x00, 0x00, 0x79};
-    char response[9];
-
-    SENSOR_SERIAL.write(request, 9);
-    SENSOR_SERIAL.readBytes(response, 9);
-
-    if (getCheckSum(response)) {
-        int ppm = (256 * response[2]) + response[3];
-        DATA_SERIAL.println("CO2 Level: " + String(ppm) + "ppm");
-        return ppm;
-    } else {
-        DATA_SERIAL.println("CO2 Sensor CRC error!");
-        return -1;
-    }
 }
 
 bool loadConfig() {
     File configFile = SPIFFS.open("/config.json", "r");
     if (!configFile) {
-        DATA_SERIAL.println("Failed to open config file");
+        DEBUG_SERIAL.println("Failed to open config file");
         return false;
     }
 
     size_t size = configFile.size();
     if (size > 1024) {
-        DATA_SERIAL.println("Config file size is too large");
+        DEBUG_SERIAL.println("Config file size is too large");
         return false;
     }
 
@@ -183,7 +172,7 @@ bool loadConfig() {
     JsonObject &json = jsonBuffer.parseObject(buf.get());
 
     if (!json.success()) {
-        DATA_SERIAL.println("Failed to parse config file");
+        DEBUG_SERIAL.println("Failed to parse config file");
         return false;
     }
 
@@ -210,7 +199,7 @@ void setupWiFi() {
 
     // wifiManager.setTimeout(180);
     if (!wifiManager.autoConnect("EZagro", "ezsecret")) {
-        DATA_SERIAL.println("failed to connect and hit timeout");
+        DEBUG_SERIAL.println("failed to connect and hit timeout");
         delay(3000);
         //reset and try again, or maybe put it to deep sleep
         ESP.reset();
@@ -219,7 +208,7 @@ void setupWiFi() {
 
     //save the custom parameters to FS
     if (shouldSaveConfig) {
-        DATA_SERIAL.println("saving config");
+        DEBUG_SERIAL.println("saving config");
         DynamicJsonBuffer jsonBuffer;
         JsonObject &json = jsonBuffer.createObject();
         json["device_id"] = custom_device_id.getValue();
@@ -227,31 +216,31 @@ void setupWiFi() {
 
         File configFile = SPIFFS.open("/config.json", "w");
         if (!configFile) {
-            DATA_SERIAL.println("failed to open config file for writing");
+            DEBUG_SERIAL.println("failed to open config file for writing");
         }
 
-        json.printTo(DATA_SERIAL);
+        json.printTo(DEBUG_SERIAL);
         json.printTo(configFile);
         configFile.close();
         //end save
     }
 
     //if you get here you have connected to the WiFi
-    DATA_SERIAL.println("WiFi connected");
+    DEBUG_SERIAL.println("WiFi connected");
 
-    DATA_SERIAL.print("IP address: ");
-    DATA_SERIAL.println(WiFi.localIP());
+    DEBUG_SERIAL.print("IP address: ");
+    DEBUG_SERIAL.println(WiFi.localIP());
 }
 
 void wifiModeCallback(WiFiManager *myWiFiManager) {
-    DATA_SERIAL.println("Entered config mode");
-    DATA_SERIAL.println(WiFi.softAPIP());
+    DEBUG_SERIAL.println("Entered config mode");
+    DEBUG_SERIAL.println(WiFi.softAPIP());
 }
 
 // Virtual pin update FW
 BLYNK_WRITE(V22) {
     if (param.asInt() == 1) {
-        DATA_SERIAL.println("Got a FW update request");
+        DEBUG_SERIAL.println("Got a FW update request");
 
         char full_version[34]{""};
         strcat(full_version, device_id);
@@ -261,13 +250,13 @@ BLYNK_WRITE(V22) {
         t_httpUpdate_return ret = ESPhttpUpdate.update("http://firmware.ezagro.kumekay.com/update", full_version);
         switch (ret) {
             case HTTP_UPDATE_FAILED:
-                DATA_SERIAL.println("[update] Update failed.");
+                DEBUG_SERIAL.println("[update] Update failed.");
                 break;
             case HTTP_UPDATE_NO_UPDATES:
-                DATA_SERIAL.println("[update] Update no Update.");
+                DEBUG_SERIAL.println("[update] Update no Update.");
                 break;
             case HTTP_UPDATE_OK:
-                DATA_SERIAL.println("[update] Update ok.");
+                DEBUG_SERIAL.println("[update] Update ok.");
                 break;
         }
 
@@ -281,7 +270,7 @@ BLYNK_WRITE(V23) {
 
 void setup() {
     // Init serial port
-    DATA_SERIAL.begin(115200);
+    DEBUG_SERIAL.begin(115200);
 
     // Init I2C interface
     Wire.begin(I2C_SDA, I2C_SCL);
@@ -291,7 +280,7 @@ void setup() {
 
     // Init Pressure/Temperature sensor
     if (!bmp.begin()) {
-        DATA_SERIAL.println("Could not find a valid BMP085 sensor, check wiring!");
+        DEBUG_SERIAL.println("Could not find a valid BMP085 sensor, check wiring!");
     }
 
     // Init LCD display
@@ -300,7 +289,7 @@ void setup() {
 
     // Init filesystem
     if (!SPIFFS.begin()) {
-        DATA_SERIAL.println("Failed to mount file system");
+        DEBUG_SERIAL.println("Failed to mount file system");
         ESP.reset();
     }
 
@@ -309,10 +298,10 @@ void setup() {
 
     // Load config
     if (!loadConfig()) {
-        DATA_SERIAL.println("Failed to load config");
+        DEBUG_SERIAL.println("Failed to load config");
         factoryReset();
     } else {
-        DATA_SERIAL.println("Config loaded");
+        DEBUG_SERIAL.println("Config loaded");
     }
 
     // Start blynk

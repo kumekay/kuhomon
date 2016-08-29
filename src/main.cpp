@@ -18,13 +18,37 @@
 // JSON
 #include <ArduinoJson.h>          //https://github.com/bblanchon/ArduinoJson
 
-// Use I2C
-#define I2C_SDA 9 // SD2
-#define I2C_SCL 10 // SD3
 
+// GPIO Defines
+#define I2C_SDA 0 // D3
+#define I2C_SCL 4 // D2
+
+// #define SW_SERIAL_RX 12 // D6
+// #define SW_SERIAL_TX 15 // D8
+
+// lcd
+#define __CS  16  //(D0)
+#define __DC  5   //(D1)
+// #define __RST 4   //(D2)
+/*
+ SCLK:D5
+ MOSI:D7
+*/
+
+// - Vcc       -->     +3V3V(!!!!)
+// - Gnd       -->     Gnd
+// - CS        -->     D0
+// - RST       -->     D2 (optional) if not used tie to +3V3 or 4k7..10K to 3V3 (do NOT leave float!)
+// - A0        -->     D1
+// - SDA       -->     Mosi (D7)
+// - SCK       -->     Sclk (D5)
+// - LED       -->     Some display need a resistor (see note below)
+
+#include <SPI.h>
 #include <Wire.h>
 
 // Pressure and Temperature
+#include <Adafruit_Sensor.h>
 #include <Adafruit_BMP085.h>
 
 // Use TFT_ILI9163C display library
@@ -35,30 +59,19 @@
 
 #include <SoftwareSerial.h>
 
-SoftwareSerial swSerial(5, 4); // Rx, Tx
+// SoftwareSerial swSerial(SW_SERIAL_RX, SW_SERIAL_TX);
 
 // CO2 SERIAL
-#define DEBUG_SERIAL Serial
-#define SENSOR_SERIAL swSerial
+#define DEBUG_SERIAL Serial1
+#define SENSOR_SERIAL Serial
 
 byte cmd[9] = {0xFF,0x01,0x86,0x00,0x00,0x00,0x00,0x00,0x79};
 unsigned char response[7];
 
-// Pressure and temperature sensor
-Adafruit_BMP085 bmp;
+// Pressure, temperature and humidity sensor
+Adafruit_BMP085 bme;
 
-// lcd
-#define __CS  16  //(D0)
-#define __DC  2   //(D4)
-#define __RST 0   //(D3)
-
-/*
- SCLK:D5 // GPIO 14
- MOSI:D7 // GPIO 13
-*/
-
-TFT_ILI9163C lcd = TFT_ILI9163C(__CS, __DC, __RST);
-
+TFT_ILI9163C lcd = TFT_ILI9163C(__CS, __DC);
 
 // Blynk token
 char blynk_token[33]{"Blynk token"};
@@ -91,8 +104,8 @@ void factoryReset() {
 }
 
 void sendMeasurements() {
-    auto t2 = String(bmp.readTemperature(), 0);
-    auto p = String(bmp.readPressure(), 0);
+    auto t2 = String(bme.readTemperature(), 0);
+    auto p = String(bme.readPressure());
 
     Blynk.virtualWrite(V3, t2);
     Blynk.virtualWrite(V4, p);
@@ -145,6 +158,9 @@ void sendMeasurements() {
     lcd.println("P: " + p + "Pa T: " + t2 + "C");
     DEBUG_SERIAL.println("P: " + p + "Pa T: " + t2 + "C");
 
+    lcd.println("CO2: " + co2 + "ppm");
+    DEBUG_SERIAL.println("CO2: " + co2 + "ppm");
+
 }
 
 bool loadConfig() {
@@ -191,7 +207,7 @@ void setupWiFi() {
     wifiManager.addParameter(&custom_blynk_token);
     wifiManager.addParameter(&custom_device_id);
 
-    // lcd.clear();
+    lcd.clearScreen();
 
     // add logo
     lcd.println("Connect to WiFi:");
@@ -269,8 +285,11 @@ BLYNK_WRITE(V23) {
 }
 
 void setup() {
-    // Init serial port
+    // Init serial ports
     DEBUG_SERIAL.begin(115200);
+
+    SENSOR_SERIAL.begin(9600);
+    // SENSOR_SERIAL.swap();
 
     // Init I2C interface
     Wire.begin(I2C_SDA, I2C_SCL);
@@ -279,13 +298,12 @@ void setup() {
 //    dht.begin();
 
     // Init Pressure/Temperature sensor
-    if (!bmp.begin()) {
+    if (!bme.begin()) {
         DEBUG_SERIAL.println("Could not find a valid BMP085 sensor, check wiring!");
     }
 
     // Init LCD display
     lcd.begin();
-
 
     // Init filesystem
     if (!SPIFFS.begin()) {

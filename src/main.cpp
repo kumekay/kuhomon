@@ -23,11 +23,9 @@
 #define I2C_SDA 0 // D3
 #define I2C_SCL 2 // D4
 
-// DHT
-#include "DHT.h"
-#define DHTPIN 4 // D2
-#define DHTTYPE DHT11
-DHT dht(DHTPIN, DHTTYPE);
+// Humidity/Temperature SI7021
+#include <SI7021.h>
+SI7021 si7021;
 
 // #define SW_SERIAL_RX 12 // D6
 // #define SW_SERIAL_TX 15 // D8
@@ -115,13 +113,13 @@ void sendMeasurements() {
         DEBUG_SERIAL.println(String(device_id) + " " + String(fw_ver));
 
         // H/T
-        float hf = dht.readHumidity();
-        float tf = dht.readTemperature();
+        float tf = si7021.getCelsiusHundredths() / 100.0 ;
+        int hi = si7021.getHumidityPercent();
 
-        auto h = String(hf, 0);
+        auto h = String(hi);
         auto t = String(tf, 0);
 
-        if (isnan(hf) || isnan(tf) ) {
+        if (isnan(hi) || isnan(tf) ) {
                 h = "--";
                 t = "--";
         }
@@ -329,7 +327,7 @@ void setup() {
         Wire.begin(I2C_SDA, I2C_SCL);
 
         // Init Humidity/Temperature sensor
-        dht.begin();
+        si7021.begin(I2C_SDA, I2C_SCL);
 
         // Init Pressure/Temperature sensor
         if (!bme.begin()) {

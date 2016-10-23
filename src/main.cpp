@@ -30,33 +30,14 @@ SI7021 si7021;
 // #define SW_SERIAL_RX 12 // D6
 // #define SW_SERIAL_TX 15 // D8
 
-// lcd
-#define __CS  16  //(D0)
-#define __DC  5   //(D1)
-// #define __RST 4   //(D2)
-/*
-   SCLK:D5
-   MOSI:D7
- */
-
-// - Vcc       -->     +3V3V(!!!!)
-// - Gnd       -->     Gnd
-// - CS        -->     D0
-// - RST       -->     D2 (optional) if not used tie to +3V3 or 4k7..10K to 3V3 (do NOT leave float!)
-// - A0        -->     D1
-// - SDA       -->     Mosi (D7)
-// - SCK       -->     Sclk (D5)
-// - LED       -->     Some display need a resistor (see note below)
-
-#include <SPI.h>
 #include <Wire.h>
 
 // Pressure and Temperature
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BMP085.h>
 
-// Use TFT_ILI9163C display library
-#include <TFT_ILI9163C.h>
+// Use i2c OLED Lib
+#include "OLED.h"
 
 // Handy timers
 #include <SimpleTimer.h>
@@ -75,7 +56,7 @@ unsigned char response[7];
 // Pressure, temperature and humidity sensor
 Adafruit_BMP085 bme;
 
-TFT_ILI9163C lcd = TFT_ILI9163C(__CS, __DC);
+OLED lcd(I2C_SDA, I2C_SCL);
 
 // Blynk token
 char blynk_token[33] {"Blynk token"};
@@ -107,11 +88,63 @@ void factoryReset() {
         ESP.reset();
 }
 
-void sendMeasurements() {
-        lcd.clearScreen();
-        lcd.println(String(device_id) + " " + String(fw_ver));
-        DEBUG_SERIAL.println(String(device_id) + " " + String(fw_ver));
 
+char *c_str(String s) {
+  char *cstr = new char[s.length() + 1];
+  return strcpy(cstr, s.c_str());
+}
+
+void printString(String str,  uint8_t r=0, uint8_t c=0) {
+  char *line { c_str(String(str))};
+  lcd.print(line, r, c);
+  DEBUG_SERIAL.println(line);
+}
+
+String readCO2() {
+  // CO2
+  String co2 {"--"};
+  bool header_found {false};
+  char tries {0};
+
+  SENSOR_SERIAL.write(cmd, 9);
+  memset(response, 0, 7);
+
+  // Looking for packet start
+  while(SENSOR_SERIAL.available() && (!header_found)) {
+          if(SENSOR_SERIAL.read() == 0xff ) {
+                  if(SENSOR_SERIAL.read() == 0x86 ) header_found = true;
+          }
+  }
+
+  if (header_found) {
+          SENSOR_SERIAL.readBytes(response, 7);
+
+          byte crc = 0x86;
+          for (char i = 0; i < 6; i++) {
+                  crc+=response[i];
+          }
+          crc = 0xff - crc;
+          crc++;
+
+          if ( !(response[6] == crc) ) {
+                  DEBUG_SERIAL.println("CO2: CRC error: " + String(crc) + " / "+ String(response[6]));
+          } else {
+                  unsigned int responseHigh = (unsigned int) response[0];
+                  unsigned int responseLow = (unsigned int) response[1];
+                  unsigned int ppm = (256*responseHigh) + responseLow;
+                  co2 = String(ppm);
+                  DEBUG_SERIAL.println("CO2:" + String(co2));
+          }
+  } else {
+          DEBUG_SERIAL.println("CO2: Header not found");
+  }
+
+  return co2;
+}
+
+void sendMeasurements() {
+        lcd.clear();
+        printString(String(device_id) + " " + String(fw_ver));
         // H/T
         float tf = si7021.getCelsiusHundredths() / 100.0 ;
         int hi = si7021.getHumidityPercent();
@@ -127,61 +160,20 @@ void sendMeasurements() {
         Blynk.virtualWrite(V1, t);
         Blynk.virtualWrite(V2, h);
 
-        lcd.println("H: " + h + "% T: " + t + "C");
-        DEBUG_SERIAL.println("H: " + h + "% T: " + t + "C");
-
+        printString("H: " + h + "% T: " + t + "C", 1);
 
         // P/T2
         auto t2 = String(bme.readTemperature(), 0);
         auto p = String(bme.readPressure());
 
-        lcd.println("P: " + p + "Pa T: " + t2 + "C");
-        DEBUG_SERIAL.println("P: " + p + "Pa T: " + t2 + "C");
+        printString("P: " + p + "Pa T: " + t2 + "C", 2);
 
         Blynk.virtualWrite(V3, t2);
         Blynk.virtualWrite(V4, p);
 
 
-        // CO2
-        String co2 {"--"};
-        bool header_found {false};
-        char tries {0};
-
-        SENSOR_SERIAL.write(cmd, 9);
-        memset(response, 0, 7);
-
-        // Looking for packet start
-        while(SENSOR_SERIAL.available() && (!header_found)) {
-                if(SENSOR_SERIAL.read() == 0xff ) {
-                        if(SENSOR_SERIAL.read() == 0x86 ) header_found = true;
-                }
-        }
-
-        if (header_found) {
-                SENSOR_SERIAL.readBytes(response, 7);
-
-                byte crc = 0x86;
-                for (char i = 0; i < 6; i++) {
-                        crc+=response[i];
-                }
-                crc = 0xff - crc;
-                crc++;
-
-                if ( !(response[6] == crc) ) {
-                        DEBUG_SERIAL.println("CO2: CRC error: " + String(crc) + " / "+ String(response[6]));
-                } else {
-                        unsigned int responseHigh = (unsigned int) response[0];
-                        unsigned int responseLow = (unsigned int) response[1];
-                        unsigned int ppm = (256*responseHigh) + responseLow;
-                        co2 = String(ppm);
-                        DEBUG_SERIAL.println("CO2:" + String(co2));
-                }
-        } else {
-                DEBUG_SERIAL.println("CO2: Header not found");
-        }
-
-        lcd.println("CO2: " + co2 + "ppm");
-        DEBUG_SERIAL.println("CO2: " + co2 + "ppm");
+        String co2 = readCO2();
+        printString("CO2: " + co2 + "ppm", 3);
 
         Blynk.virtualWrite(V5, co2);
 }
@@ -230,22 +222,19 @@ void setupWiFi() {
         wifiManager.addParameter(&custom_blynk_token);
         wifiManager.addParameter(&custom_device_id);
 
-        lcd.clearScreen();
+        lcd.clear();
 
         // wifiManager.setTimeout(180);
 
         String ssid { "ku_" +  String(ESP.getChipId())};
         String pass {"ku_pass_" + String(ESP.getFlashChipId()) };
 
-        lcd.println("Connect to WiFi:");
-        lcd.println("Network: ");
-        lcd.println(ssid);
-        lcd.println("Password: ");
-        lcd.println(pass);
-
-        lcd.println("And open browser: ");
-        lcd.println("http://192.168.4.1");
-        lcd.println("to set up your device");
+        printString("Connect to WiFi:",1);
+        printString("Network: " + ssid,2);
+        printString("Password: "+ pass,3);
+        printString("And open browser:", 4);
+        printString("http://192.168.4.1", 5);
+        printString("to set up your device", 6);
 
         if (!wifiManager.autoConnect(ssid.c_str(), pass.c_str())) {
                 DEBUG_SERIAL.println("failed to connect and hit timeout");

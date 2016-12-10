@@ -18,33 +18,28 @@
 // JSON
 #include <ArduinoJson.h>          //https://github.com/bblanchon/ArduinoJson
 
-
 // GPIO Defines
-#define I2C_SDA 0 // D3
-#define I2C_SCL 2 // D4
+#define I2C_SDA 5 // D1 Orange
+#define I2C_SCL 4 // D2 Yellow
 
 // Humidity/Temperature SI7021
 #include <SI7021.h>
 SI7021 si7021;
 
-// #define SW_SERIAL_RX 12 // D6
-// #define SW_SERIAL_TX 15 // D8
-
 #include <Wire.h>
 
 // Pressure and Temperature
-#include <Adafruit_Sensor.h>
 #include <Adafruit_BMP085.h>
 
-// Use i2c OLED Lib
-#include "OLED.h"
+// Use U8g2 for i2c OLED Lib
+#include <SPI.h>
+#include <U8g2lib.h>
+U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, I2C_SCL, I2C_SDA, U8X8_PIN_NONE);
 
 // Handy timers
 #include <SimpleTimer.h>
 
 #include <SoftwareSerial.h>
-
-// SoftwareSerial swSerial(SW_SERIAL_RX, SW_SERIAL_TX);
 
 // CO2 SERIAL
 #define DEBUG_SERIAL Serial1
@@ -53,19 +48,18 @@ SI7021 si7021;
 byte cmd[9] = {0xFF,0x01,0x86,0x00,0x00,0x00,0x00,0x00,0x79};
 unsigned char response[7];
 
-// Pressure, temperature and humidity sensor
+// Pressure and temperature
 Adafruit_BMP085 bme;
-
-OLED lcd(I2C_SDA, I2C_SCL);
 
 // Blynk token
 char blynk_token[33] {"Blynk token"};
-const char blynk_domain[] {"ezagro.kumekay.com"};
+char blynk_domain[64] {"ezagro.kumekay.com"};
+// char blynk_domain[64] {"blynk-cloud.com"};
 const uint16_t blynk_port {8442};
 
 // Device Id
 char device_id[17] = "Device ID";
-char fw_ver[17] = "v0.0.4";
+const char fw_ver[17] = "0.1.0";
 
 // Handy timer
 SimpleTimer timer;
@@ -75,6 +69,14 @@ WiFiManager wifiManager;
 
 //flag for saving data
 bool shouldSaveConfig = false;
+
+// Sensors data
+int t {-100};
+int p {-1};
+int h {-1};
+int co2 {-1};
+
+char loader[4] {'.'};
 
 //callback notifying the need to save config
 void saveConfigCallback() {
@@ -88,94 +90,150 @@ void factoryReset() {
         ESP.reset();
 }
 
-
-char *c_str(String s) {
-  char *cstr = new char[s.length() + 1];
-  return strcpy(cstr, s.c_str());
+void printString(String str) {
+        DEBUG_SERIAL.println(str);
 }
 
-void printString(String str,  uint8_t r=0, uint8_t c=0) {
-  char *line { c_str(String(str))};
-  lcd.print(line, r, c);
-  DEBUG_SERIAL.println(line);
-}
+void readCO2() {
+        // CO2
+        bool header_found {false};
+        char tries {0};
 
-String readCO2() {
-  // CO2
-  String co2 {"--"};
-  bool header_found {false};
-  char tries {0};
+        SENSOR_SERIAL.write(cmd, 9);
+        memset(response, 0, 7);
 
-  SENSOR_SERIAL.write(cmd, 9);
-  memset(response, 0, 7);
+        // Looking for packet start
+        while(SENSOR_SERIAL.available() && (!header_found)) {
+                if(SENSOR_SERIAL.read() == 0xff ) {
+                        if(SENSOR_SERIAL.read() == 0x86 ) header_found = true;
+                }
+        }
 
-  // Looking for packet start
-  while(SENSOR_SERIAL.available() && (!header_found)) {
-          if(SENSOR_SERIAL.read() == 0xff ) {
-                  if(SENSOR_SERIAL.read() == 0x86 ) header_found = true;
-          }
-  }
+        if (header_found) {
+                SENSOR_SERIAL.readBytes(response, 7);
 
-  if (header_found) {
-          SENSOR_SERIAL.readBytes(response, 7);
+                byte crc = 0x86;
+                for (char i = 0; i < 6; i++) {
+                        crc+=response[i];
+                }
+                crc = 0xff - crc;
+                crc++;
 
-          byte crc = 0x86;
-          for (char i = 0; i < 6; i++) {
-                  crc+=response[i];
-          }
-          crc = 0xff - crc;
-          crc++;
+                if ( !(response[6] == crc) ) {
+                        DEBUG_SERIAL.println("CO2: CRC error: " + String(crc) + " / "+ String(response[6]));
+                } else {
+                        unsigned int responseHigh = (unsigned int) response[0];
+                        unsigned int responseLow = (unsigned int) response[1];
+                        unsigned int ppm = (256*responseHigh) + responseLow;
+                        co2 = ppm;
+                        DEBUG_SERIAL.println("CO2:" + String(co2));
+                }
+        } else {
+                DEBUG_SERIAL.println("CO2: Header not found");
+        }
 
-          if ( !(response[6] == crc) ) {
-                  DEBUG_SERIAL.println("CO2: CRC error: " + String(crc) + " / "+ String(response[6]));
-          } else {
-                  unsigned int responseHigh = (unsigned int) response[0];
-                  unsigned int responseLow = (unsigned int) response[1];
-                  unsigned int ppm = (256*responseHigh) + responseLow;
-                  co2 = String(ppm);
-                  DEBUG_SERIAL.println("CO2:" + String(co2));
-          }
-  } else {
-          DEBUG_SERIAL.println("CO2: Header not found");
-  }
-
-  return co2;
 }
 
 void sendMeasurements() {
-        lcd.clear();
-        printString(String(device_id) + " " + String(fw_ver));
-        // H/T
-        float tf = si7021.getCelsiusHundredths() / 100.0 ;
-        int hi = si7021.getHumidityPercent();
+        // Read data
+        // Temperature
+        float tf = si7021.getCelsiusHundredths() / 100.0;
+        float t2f =bme.readTemperature();
+        t = static_cast<int>((tf + t2f) / 2);
 
-        auto h = String(hi);
-        auto t = String(tf, 0);
+        // Humidity
+        h = si7021.getHumidityPercent();
 
-        if (isnan(hi) || isnan(tf) ) {
-                h = "--";
-                t = "--";
-        }
+        // Pressure (in mmHg)
+        p = static_cast<int>(bme.readPressure() * 760.0 / 101325);
 
+        // CO2
+        readCO2();
+
+        // Send to server
         Blynk.virtualWrite(V1, t);
         Blynk.virtualWrite(V2, h);
-
-        printString("H: " + h + "% T: " + t + "C", 1);
-
-        // P/T2
-        auto t2 = String(bme.readTemperature(), 0);
-        auto p = String(bme.readPressure());
-
-        printString("P: " + p + "Pa T: " + t2 + "C", 2);
-
-        Blynk.virtualWrite(V3, t2);
         Blynk.virtualWrite(V4, p);
-
-
-        String co2 = readCO2();
-        printString("CO2: " + co2 + "ppm", 3);
-
         Blynk.virtualWrite(V5, co2);
+
+        // Write to debug console
+        printString("H: " + String(h) + "%");
+        printString("T: " + String(t) + "C");
+        printString("P: " + String(p) + "mmHg");
+        printString("CO2: " + String(co2) + "ppm");
+}
+
+
+void loading() {
+        long unsigned int count {(millis() / 500) % 4};
+        memset(loader, '.', count);
+        memset(&loader[count], 0, 1);
+}
+
+void draw() {
+        u8g2.clearBuffer();
+        loading();
+        byte x {0};
+        byte y {0};
+
+        // CO2
+        if (co2 > -1) {
+                char co2a [5];
+                sprintf (co2a, "%i", co2);
+
+                u8g2.setFont(u8g2_font_inb19_mf);
+                x = (128 - u8g2.getStrWidth(co2a))/2;
+                y = u8g2.getFontAscent() - u8g2.getFontDescent();
+                u8g2.drawStr(x, y, co2a);
+
+                const char ppm[] {"ppm"};
+                u8g2.setFont(u8g2_font_6x12_mf);
+                x = (128 - u8g2.getStrWidth(ppm)) / 2;
+                y = y + u8g2.getFontAscent() - u8g2.getFontDescent();
+                u8g2.drawStr(x, y, ppm);
+        } else {
+                u8g2.setFont(u8g2_font_inb19_mf);
+                x = (128 - u8g2.getStrWidth(loader)) / 2;
+                y = u8g2.getFontAscent() - u8g2.getFontDescent();
+                u8g2.drawStr(x, y, loader);
+        }
+
+        // Cycle other meauserments
+        String measurement {loader};
+        const char degree {176};
+
+        // Switch every 3 seconds
+        switch((millis() / 3000) % 3) {
+        case 0:
+                if (t > -100) { measurement = "T: " + String(t) + degree + "C"; }
+                break;
+        case 1:
+                if (h > -1) { measurement = "H: " + String(h) + "%"; }
+                break;
+        default:
+                if (p > -1) { measurement =  "P: " + String(p) + " mmHg"; }
+        }
+
+        char measurementa [12];
+        measurement.toCharArray(measurementa, 12);
+
+        u8g2.setFont(u8g2_font_9x18_mf);
+        x = (128 - u8g2.getStrWidth(measurementa))/2;
+        y = 64 + u8g2.getFontDescent();
+        u8g2.drawStr(x, y, measurementa);
+
+        u8g2.sendBuffer();
+}
+
+void drawSetup(String msg = "Loading...") {
+        byte x {0};
+        byte y {0};
+        u8g2.clearBuffer();
+        u8g2.setFont(u8g2_font_9x18_mf);
+        x = (128 - u8g2.getStrWidth(msg.c_str())) / 2;
+        y = 32 + u8g2.getFontAscent() / 2;
+        u8g2.drawStr(x, y, msg.c_str());
+        u8g2.sendBuffer();
 }
 
 bool loadConfig() {
@@ -222,26 +280,20 @@ void setupWiFi() {
         wifiManager.addParameter(&custom_blynk_token);
         wifiManager.addParameter(&custom_device_id);
 
-        lcd.clear();
-
-        // wifiManager.setTimeout(180);
-
         String ssid { "ku_" +  String(ESP.getChipId())};
-        String pass {"ku_pass_" + String(ESP.getFlashChipId()) };
+        String pass {"ku_" + String(ESP.getFlashChipId()) };
 
-        printString("Connect to WiFi:",1);
-        printString("Network: " + ssid,2);
-        printString("Password: "+ pass,3);
-        printString("And open browser:", 4);
-        printString("http://192.168.4.1", 5);
-        printString("to set up your device", 6);
+        printString("Connect to WiFi:");
+        printString("net: " + ssid);
+        printString("pw: "+ pass);
+        printString("Open browser:");
+        printString("192.168.4.1");
+        printString("to setup device");
+
+        wifiManager.setTimeout(180);
 
         if (!wifiManager.autoConnect(ssid.c_str(), pass.c_str())) {
                 DEBUG_SERIAL.println("failed to connect and hit timeout");
-                delay(3000);
-                //reset and try again, or maybe put it to deep sleep
-                ESP.reset();
-                delay(5000);
         }
 
         //save the custom parameters to FS
@@ -285,7 +337,7 @@ BLYNK_WRITE(V22) {
                 strcat(full_version, "::");
                 strcat(full_version, fw_ver);
 
-                t_httpUpdate_return ret = ESPhttpUpdate.update("http://firmware.ezagro.kumekay.com/update", full_version);
+                t_httpUpdate_return ret = ESPhttpUpdate.update("http://romfrom.space/get", full_version);
                 switch (ret) {
                 case HTTP_UPDATE_FAILED:
                         DEBUG_SERIAL.println("[update] Update failed.");
@@ -311,9 +363,14 @@ void setup() {
         DEBUG_SERIAL.begin(115200);
 
         SENSOR_SERIAL.begin(9600);
+        SENSOR_SERIAL.swap();  // GPIO15 (TX) and GPIO13 (RX)
 
         // Init I2C interface
         Wire.begin(I2C_SDA, I2C_SCL);
+
+        // Init display
+        u8g2.begin();
+        drawSetup();
 
         // Init Humidity/Temperature sensor
         si7021.begin(I2C_SDA, I2C_SCL);
@@ -323,9 +380,6 @@ void setup() {
                 DEBUG_SERIAL.println("Could not find a valid BMP085 sensor, check wiring!");
         }
 
-        // Init LCD display
-        lcd.begin();
-
         // Init filesystem
         if (!SPIFFS.begin()) {
                 DEBUG_SERIAL.println("Failed to mount file system");
@@ -333,6 +387,7 @@ void setup() {
         }
 
         // Setup WiFi
+        drawSetup("Connecting...");
         setupWiFi();
 
         // Load config
@@ -355,4 +410,5 @@ void setup() {
 void loop() {
         Blynk.run();
         timer.run();
+        draw();
 }

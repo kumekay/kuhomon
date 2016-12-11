@@ -14,4 +14,9 @@ System for measurement CO2/Humidity/Temperature/Pressure with OLED display and d
 
 Model for printing kuhomon_case.stl
 
-*NB: To fit system to this case you have to use short wires*
+Known issues:
+- To fit system to this case you have to use short wires
+- Temperature measurements seems to be higher due to heat from ESP8266
+
+## TODO
+- Add offline support (show data on screen without WiFi)

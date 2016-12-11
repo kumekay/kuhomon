@@ -35,11 +35,11 @@ SI7021 si7021;
 #include <SPI.h>
 #include <U8g2lib.h>
 U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, I2C_SCL, I2C_SDA, U8X8_PIN_NONE);
+byte x {0};
+byte y {0};
 
 // Handy timers
 #include <SimpleTimer.h>
-
-#include <SoftwareSerial.h>
 
 // CO2 SERIAL
 #define DEBUG_SERIAL Serial1
@@ -53,8 +53,7 @@ Adafruit_BMP085 bme;
 
 // Blynk token
 char blynk_token[33] {"Blynk token"};
-char blynk_domain[64] {"ezagro.kumekay.com"};
-// char blynk_domain[64] {"blynk-cloud.com"};
+char blynk_server[64] {"blynk-cloud.com"};
 const uint16_t blynk_port {8442};
 
 // Device Id
@@ -66,6 +65,10 @@ SimpleTimer timer;
 
 // Setup Wifi connection
 WiFiManager wifiManager;
+
+// Network credentials
+String ssid { "ku_" +  String(ESP.getChipId())};
+String pass {"ku_" + String(ESP.getFlashChipId()) };
 
 //flag for saving data
 bool shouldSaveConfig = false;
@@ -172,9 +175,6 @@ void loading() {
 
 void draw() {
         u8g2.clearBuffer();
-        loading();
-        byte x {0};
-        byte y {0};
 
         // CO2
         if (co2 > -1) {
@@ -183,23 +183,24 @@ void draw() {
 
                 u8g2.setFont(u8g2_font_inb19_mf);
                 x = (128 - u8g2.getStrWidth(co2a))/2;
-                y = u8g2.getFontAscent() - u8g2.getFontDescent();
+                y = u8g2.getAscent() - u8g2.getDescent();
                 u8g2.drawStr(x, y, co2a);
 
-                const char ppm[] {"ppm"};
+                const char ppm[] {"ppm CO2"};
                 u8g2.setFont(u8g2_font_6x12_mf);
                 x = (128 - u8g2.getStrWidth(ppm)) / 2;
-                y = y + u8g2.getFontAscent() - u8g2.getFontDescent();
+                y = y + 2 + u8g2.getAscent() - u8g2.getDescent();
                 u8g2.drawStr(x, y, ppm);
         } else {
+                loading();
                 u8g2.setFont(u8g2_font_inb19_mf);
                 x = (128 - u8g2.getStrWidth(loader)) / 2;
-                y = u8g2.getFontAscent() - u8g2.getFontDescent();
+                y = u8g2.getAscent() - u8g2.getDescent();
                 u8g2.drawStr(x, y, loader);
         }
 
         // Cycle other meauserments
-        String measurement {loader};
+        String measurement {"..."};
         const char degree {176};
 
         // Switch every 3 seconds
@@ -219,20 +220,52 @@ void draw() {
 
         u8g2.setFont(u8g2_font_9x18_mf);
         x = (128 - u8g2.getStrWidth(measurementa))/2;
-        y = 64 + u8g2.getFontDescent();
+        y = 64 + u8g2.getDescent();
         u8g2.drawStr(x, y, measurementa);
 
         u8g2.sendBuffer();
 }
 
-void drawSetup(String msg = "Loading...") {
-        byte x {0};
-        byte y {0};
+void drawBoot(String msg = "Loading...") {
         u8g2.clearBuffer();
         u8g2.setFont(u8g2_font_9x18_mf);
         x = (128 - u8g2.getStrWidth(msg.c_str())) / 2;
-        y = 32 + u8g2.getFontAscent() / 2;
+        y = 32 + u8g2.getAscent() / 2;
         u8g2.drawStr(x, y, msg.c_str());
+        u8g2.sendBuffer();
+}
+
+void drawConnectionDetails(String ssid, String pass, String url) {
+        String msg {""};
+        u8g2.clearBuffer();
+
+        msg = "Connect to WiFi:";
+        u8g2.setFont(u8g2_font_7x13_mf);
+        x = (128 - u8g2.getStrWidth(msg.c_str())) / 2;
+        y = u8g2.getAscent() - u8g2.getDescent();
+        u8g2.drawStr(x, y, msg.c_str());
+
+        msg = "net: " + ssid;
+        x = (128 - u8g2.getStrWidth(msg.c_str())) / 2;
+        y = y + 1 + u8g2.getAscent() - u8g2.getDescent();
+        u8g2.drawStr(x, y, msg.c_str());
+
+        msg = "pw: "+ pass;
+        x = (128 - u8g2.getStrWidth(msg.c_str())) / 2;
+        y = y + 1 + u8g2.getAscent() - u8g2.getDescent();
+        u8g2.drawStr(x, y, msg.c_str());
+
+        msg = "Open browser:";
+        x = (128 - u8g2.getStrWidth(msg.c_str())) / 2;
+        y = y + 1 + u8g2.getAscent() - u8g2.getDescent();
+        u8g2.drawStr(x, y, msg.c_str());
+
+        // URL
+        // u8g2.setFont(u8g2_font_6x12_mf);
+        x = (128 - u8g2.getStrWidth(url.c_str())) / 2;
+        y = y + 1 + u8g2.getAscent() - u8g2.getDescent();
+        u8g2.drawStr(x, y, url.c_str());
+
         u8g2.sendBuffer();
 }
 
@@ -270,27 +303,32 @@ bool loadConfig() {
         strcpy(blynk_token, json["blynk_token"]);
 }
 
+void configModeCallback (WiFiManager *wifiManager) {
+        String url {"http://192.168.4.1"};
+        printString("Connect to WiFi:");
+        printString("net: " + ssid);
+        printString("pw: "+ pass);
+        printString("Open browser:");
+        printString(url);
+        printString("to setup device");
+
+        drawConnectionDetails(ssid, pass, url);
+}
+
 void setupWiFi() {
         //set config save notify callback
         wifiManager.setSaveConfigCallback(saveConfigCallback);
 
         // Custom parameters
-        WiFiManagerParameter custom_device_id("device_id", "Device ID", device_id, 16);
-        WiFiManagerParameter custom_blynk_token("blynk", "Blynk token", blynk_token, 34);
+        WiFiManagerParameter custom_device_id("device_id", "Device name", device_id, 16);
+        WiFiManagerParameter custom_blynk_server("blynk_server", "Blynk server", blynk_server, 64);
+        WiFiManagerParameter custom_blynk_token("blynk_token", "Blynk token", blynk_token, 34);
+        wifiManager.addParameter(&custom_blynk_server);
         wifiManager.addParameter(&custom_blynk_token);
         wifiManager.addParameter(&custom_device_id);
 
-        String ssid { "ku_" +  String(ESP.getChipId())};
-        String pass {"ku_" + String(ESP.getFlashChipId()) };
-
-        printString("Connect to WiFi:");
-        printString("net: " + ssid);
-        printString("pw: "+ pass);
-        printString("Open browser:");
-        printString("192.168.4.1");
-        printString("to setup device");
-
-        wifiManager.setTimeout(180);
+        // wifiManager.setTimeout(180);
+        wifiManager.setAPCallback(configModeCallback);
 
         if (!wifiManager.autoConnect(ssid.c_str(), pass.c_str())) {
                 DEBUG_SERIAL.println("failed to connect and hit timeout");
@@ -302,7 +340,9 @@ void setupWiFi() {
                 DynamicJsonBuffer jsonBuffer;
                 JsonObject &json = jsonBuffer.createObject();
                 json["device_id"] = custom_device_id.getValue();
+                json["blynk_server"] = custom_blynk_server.getValue();
                 json["blynk_token"] = custom_blynk_token.getValue();
+
 
                 File configFile = SPIFFS.open("/config.json", "w");
                 if (!configFile) {
@@ -320,11 +360,6 @@ void setupWiFi() {
 
         DEBUG_SERIAL.print("IP address: ");
         DEBUG_SERIAL.println(WiFi.localIP());
-}
-
-void wifiModeCallback(WiFiManager *myWiFiManager) {
-        DEBUG_SERIAL.println("Entered config mode");
-        DEBUG_SERIAL.println(WiFi.softAPIP());
 }
 
 // Virtual pin update FW
@@ -370,7 +405,7 @@ void setup() {
 
         // Init display
         u8g2.begin();
-        drawSetup();
+        drawBoot();
 
         // Init Humidity/Temperature sensor
         si7021.begin(I2C_SDA, I2C_SCL);
@@ -387,10 +422,10 @@ void setup() {
         }
 
         // Setup WiFi
-        drawSetup("Connecting...");
         setupWiFi();
 
         // Load config
+        drawBoot();
         if (!loadConfig()) {
                 DEBUG_SERIAL.println("Failed to load config");
                 factoryReset();
@@ -399,7 +434,7 @@ void setup() {
         }
 
         // Start blynk
-        Blynk.config(blynk_token, blynk_domain, blynk_port);
+        Blynk.config(blynk_token, blynk_server, blynk_port);
 
         // Setup a function to be called every 10 second
         timer.setInterval(10000L, sendMeasurements);

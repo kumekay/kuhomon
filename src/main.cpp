@@ -41,9 +41,14 @@ byte y {0};
 // Handy timers
 #include <SimpleTimer.h>
 
+// SW Serial
+#include <SoftwareSerial.h>
+
+SoftwareSerial swSer(13, 15, false, 256); // GPIO15 (TX) and GPIO13 (RX)
+
 // CO2 SERIAL
-#define DEBUG_SERIAL Serial1
-#define SENSOR_SERIAL Serial
+#define DEBUG_SERIAL Serial
+#define SENSOR_SERIAL swSer
 
 byte cmd[9] = {0xFF,0x01,0x86,0x00,0x00,0x00,0x00,0x00,0x79};
 unsigned char response[7];
@@ -396,9 +401,7 @@ BLYNK_WRITE(V23) {
 void setup() {
         // Init serial ports
         DEBUG_SERIAL.begin(115200);
-
         SENSOR_SERIAL.begin(9600);
-        SENSOR_SERIAL.swap();  // GPIO15 (TX) and GPIO13 (RX)
 
         // Init I2C interface
         Wire.begin(I2C_SDA, I2C_SCL);

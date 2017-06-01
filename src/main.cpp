@@ -15,12 +15,21 @@
 // Blynk
 #include <BlynkSimpleEsp8266.h>
 
+// Debounce
+#include <Bounce2.h> //https://github.com/thomasfredericks/Bounce2
+
 // JSON
 #include <ArduinoJson.h>          //https://github.com/bblanchon/ArduinoJson
 
 // GPIO Defines
 #define I2C_SDA 5 // D1 Orange
 #define I2C_SCL 4 // D2 Yellow
+#define HW_RESET 12
+
+// Debounce interval in ms
+#define DEBOUNCE_INTERVAL 10
+
+Bounce hwReset {Bounce()};
 
 // Humidity/Temperature SI7021
 #include <SI7021.h>
@@ -93,6 +102,7 @@ void saveConfigCallback() {
 }
 
 void factoryReset() {
+        DEBUG_SERIAL.println("Resetting to factory settings");
         wifiManager.resetSettings();
         SPIFFS.format();
         ESP.reset();
@@ -145,17 +155,22 @@ void readCO2() {
 void sendMeasurements() {
         // Read data
         // Temperature
+        printString("Getting Temperature from SI7021");
         float tf = si7021.getCelsiusHundredths() / 100.0;
+        printString("Getting Temperature from BMP085");
         float t2f =bme.readTemperature();
         t = static_cast<int>((tf + t2f) / 2);
 
         // Humidity
+        printString("Getting Humidity from SI7021");
         h = si7021.getHumidityPercent();
 
         // Pressure (in mmHg)
+        printString("Getting Pressure from BMP085");
         p = static_cast<int>(bme.readPressure() * 760.0 / 101325);
 
         // CO2
+        printString("Getting CO2");
         readCO2();
 
         // Send to server
@@ -275,6 +290,7 @@ void drawConnectionDetails(String ssid, String pass, String url) {
 }
 
 bool loadConfig() {
+        DEBUG_SERIAL.println("Load config...");
         File configFile = SPIFFS.open("/config.json", "r");
         if (!configFile) {
                 DEBUG_SERIAL.println("Failed to open config file");
@@ -305,6 +321,7 @@ bool loadConfig() {
 
         // Save parameters
         strcpy(device_id, json["device_id"]);
+        strcpy(blynk_server, json["blynk_server"]);
         strcpy(blynk_token, json["blynk_token"]);
 }
 
@@ -406,6 +423,11 @@ void setup() {
         // Init I2C interface
         Wire.begin(I2C_SDA, I2C_SCL);
 
+        // Setup HW reset
+        pinMode(HW_RESET,INPUT_PULLUP);
+        hwReset.interval(DEBOUNCE_INTERVAL);
+        hwReset.attach(HW_RESET);
+
         // Init display
         u8g2.begin();
         drawBoot();
@@ -425,6 +447,7 @@ void setup() {
         }
 
         // Setup WiFi
+        drawBoot("WiFi...");
         setupWiFi();
 
         // Load config
@@ -437,10 +460,24 @@ void setup() {
         }
 
         // Start blynk
+
         Blynk.config(blynk_token, blynk_server, blynk_port);
+        DEBUG_SERIAL.print("blynk server: ");
+        DEBUG_SERIAL.println(  blynk_server );
+        DEBUG_SERIAL.print("port: " );
+        DEBUG_SERIAL.println(  blynk_port );
+        DEBUG_SERIAL.print("token: " );
+        DEBUG_SERIAL.println(  blynk_token  );
+
+        drawBoot("Connecting...");
+        DEBUG_SERIAL.println("Connecting to blynk...");
+        while (Blynk.connect() == false) {
+          delay(500);
+          DEBUG_SERIAL.println("Connecting to blynk...");
+        }
 
         // Setup a function to be called every 10 second
-        timer.setInterval(10000L, sendMeasurements);
+       timer.setInterval(10000L, sendMeasurements);
 
         sendMeasurements();
 }
@@ -449,4 +486,9 @@ void loop() {
         Blynk.run();
         timer.run();
         draw();
+
+        hwReset.update();
+        if (hwReset.fell()) {
+           factoryReset();
+         }
 }

@@ -31,14 +31,13 @@
 
 Bounce hwReset {Bounce()};
 
-// Humidity/Temperature SI7021
-#include <SI7021.h>
-SI7021 si7021;
+// Humidity/Temperature/Pressure
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BME280.h>
 
 #include <Wire.h>
 
 // Pressure and Temperature
-#include <Adafruit_BMP085.h>
 
 // Use U8g2 for i2c OLED Lib
 #include <SPI.h>
@@ -63,7 +62,7 @@ byte cmd[9] = {0xFF,0x01,0x86,0x00,0x00,0x00,0x00,0x00,0x79};
 unsigned char response[7];
 
 // Pressure and temperature
-Adafruit_BMP085 bme;
+Adafruit_BME280 bme;
 
 // Blynk token
 char blynk_token[33] {"Blynk token"};
@@ -155,18 +154,16 @@ void readCO2() {
 void sendMeasurements() {
         // Read data
         // Temperature
-        printString("Getting Temperature from SI7021");
-        float tf = si7021.getCelsiusHundredths() / 100.0;
-        printString("Getting Temperature from BMP085");
-        float t2f =bme.readTemperature();
-        t = static_cast<int>((tf + t2f) / 2);
+        printString("Getting Temperature from BME280");
+        float tf = bme.readTemperature();
+        t = static_cast<int>(tf);
 
         // Humidity
-        printString("Getting Humidity from SI7021");
-        h = si7021.getHumidityPercent();
+        printString("Getting Humidity from BME280");
+        h = static_cast<int>(bme.readHumidity());
 
         // Pressure (in mmHg)
-        printString("Getting Pressure from BMP085");
+        printString("Getting Pressure from BME280");
         p = static_cast<int>(bme.readPressure() * 760.0 / 101325);
 
         // CO2
@@ -432,12 +429,10 @@ void setup() {
         u8g2.begin();
         drawBoot();
 
-        // Init Humidity/Temperature sensor
-        si7021.begin(I2C_SDA, I2C_SCL);
 
         // Init Pressure/Temperature sensor
         if (!bme.begin()) {
-                DEBUG_SERIAL.println("Could not find a valid BMP085 sensor, check wiring!");
+                DEBUG_SERIAL.println("Could not find a valid BME280 sensor, check wiring!");
         }
 
         // Init filesystem

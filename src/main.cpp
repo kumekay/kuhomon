@@ -91,6 +91,9 @@ int t {-100};
 int p {-1};
 int h {-1};
 int co2 {-1};
+float tf {0};
+float pf {0};
+float hf {0};
 
 char loader[4] {'.'};
 
@@ -155,16 +158,18 @@ void sendMeasurements() {
         // Read data
         // Temperature
         printString("Getting Temperature from BME280");
-        float tf = bme.readTemperature();
+        tf = bme.readTemperature();
         t = static_cast<int>(tf);
 
         // Humidity
         printString("Getting Humidity from BME280");
-        h = static_cast<int>(bme.readHumidity());
+        hf = bme.readHumidity();
+        h = static_cast<int>(hf);
 
         // Pressure (in mmHg)
         printString("Getting Pressure from BME280");
-        p = static_cast<int>(bme.readPressure() * 760.0 / 101325);
+        pf = bme.readPressure() * 760.0 / 101325;
+        p = static_cast<int>(pf);
 
         // CO2
         printString("Getting CO2");
@@ -177,9 +182,9 @@ void sendMeasurements() {
         Blynk.virtualWrite(V5, co2);
 
         // Write to debug console
-        printString("H: " + String(h) + "%");
-        printString("T: " + String(t) + "C");
-        printString("P: " + String(p) + "mmHg");
+        printString("H: " + String(hf) + "%");
+        printString("T: " + String(tf) + "C");
+        printString("P: " + String(pf) + "mmHg");
         printString("CO2: " + String(co2) + "ppm");
 }
 

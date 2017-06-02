@@ -436,7 +436,7 @@ void setup() {
 
 
         // Init Pressure/Temperature sensor
-        if (!bme.begin()) {
+        if (!bme.begin(0x76)) {
                 DEBUG_SERIAL.println("Could not find a valid BME280 sensor, check wiring!");
         }
 

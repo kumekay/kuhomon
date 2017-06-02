@@ -2,6 +2,8 @@
 
 System for measurement CO2/Humidity/Temperature/Pressure with OLED display and data upload through WiFi
 
+If you want to use BME280 instead of SI7021+BMP085 take a look on [BME280 branch](https://github.com/pinya/kuhomon/tree/bme280)
+
 ## Components
 
 - CO2 Sensor MH-Z19

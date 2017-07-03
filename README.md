@@ -4,6 +4,10 @@ System for measurement CO2/Humidity/Temperature/Pressure with OLED display and d
 
 If you want to use BME280 instead of SI7021+BMP085 take a look on [BME280 branch](https://github.com/pinya/kuhomon/tree/bme280)
 
+## Discussion
+[![Gitter chat](https://badges.gitter.im/kuhomon.png)](https://gitter.im/kuhomon)
+
+
 ## Components
 
 - CO2 Sensor MH-Z19

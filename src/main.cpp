@@ -115,7 +115,6 @@ void printString(String str) {
 void readCO2() {
         // CO2
         bool header_found {false};
-        char tries {0};
 
         SENSOR_SERIAL.write(cmd, 9);
         memset(response, 0, 7);

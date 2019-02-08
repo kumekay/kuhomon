@@ -26,6 +26,7 @@
                 "/Users/mac/Documents/Co2Meter/CO2Meter/.piolibdeps/WifiManager_ID567",
                 "/Users/mac/.platformio/packages/framework-arduinoespressif8266/libraries/ESP8266WebServer/src",
                 "/Users/mac/.platformio/packages/framework-arduinoespressif8266/libraries/DNSServer/src",
+                "/Users/mac/.platformio/lib/DHT sensor library_ID19",
                 "/Users/mac/.platformio/packages/framework-arduinoespressif8266/libraries/ESP8266HTTPClient/src",
                 "/Users/mac/.platformio/packages/framework-arduinoespressif8266/libraries/ESP8266httpUpdate/src",
                 "/Users/mac/.platformio/packages/framework-arduinoespressif8266/libraries/Ethernet/src",
@@ -80,6 +81,7 @@
                     "/Users/mac/Documents/Co2Meter/CO2Meter/.piolibdeps/WifiManager_ID567",
                     "/Users/mac/.platformio/packages/framework-arduinoespressif8266/libraries/ESP8266WebServer/src",
                     "/Users/mac/.platformio/packages/framework-arduinoespressif8266/libraries/DNSServer/src",
+                    "/Users/mac/.platformio/lib/DHT sensor library_ID19",
                     "/Users/mac/.platformio/packages/framework-arduinoespressif8266/libraries/ESP8266HTTPClient/src",
                     "/Users/mac/.platformio/packages/framework-arduinoespressif8266/libraries/ESP8266httpUpdate/src",
                     "/Users/mac/.platformio/packages/framework-arduinoespressif8266/libraries/Ethernet/src",
@@ -130,5 +132,6 @@
             "cppStandard": "c++11",
             "compilerPath": "/Users/mac/.platformio/packages/toolchain-xtensa/bin/xtensa-lx106-elf-gcc -mlongcalls -mtext-section-literals"
         }
-    ]
+    ],
+    "version": 4
 }

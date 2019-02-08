@@ -33,7 +33,12 @@ Bounce hwReset {Bounce()};
 
 // Humidity/Temperature/Pressure
 #include <Adafruit_Sensor.h>
-#include <Adafruit_BME280.h>
+
+//DHT22
+#include <DHT.h>
+#define DHTPIN 2     // Digital pin connected to the DHT sensor 
+#define DHTTYPE    DHT22     // DHT 22 (AM2302)
+DHT dht(DHTPIN, DHTTYPE);
 
 #include <Wire.h>
 
@@ -61,8 +66,7 @@ SoftwareSerial swSer(13, 15, false, 256); // GPIO15 (TX) and GPIO13 (RX)
 byte cmd[9] = {0xFF,0x01,0x86,0x00,0x00,0x00,0x00,0x00,0x79};
 unsigned char response[7];
 
-// Pressure and temperature
-Adafruit_BME280 bme;
+
 
 // Blynk token
 char blynk_token[33] {"Blynk token"};
@@ -158,18 +162,13 @@ void sendMeasurements() {
         // Read data
         // Temperature
         printString("Getting Temperature from BME280");
-        tf = bme.readTemperature();
+        tf = dht.readTemperature();
         t = static_cast<int>(tf);
 
         // Humidity
-        printString("Getting Humidity from BME280");
-        hf = bme.readHumidity();
+        printString("Getting Humidity from DHT22");
+        hf = dht.readHumidity();
         h = static_cast<int>(hf);
-
-        // Pressure (in mmHg)
-        printString("Getting Pressure from BME280");
-        pf = bme.readPressure() * 760.0 / 101325;
-        p = static_cast<int>(pf);
 
         // CO2
         printString("Getting CO2");
@@ -433,12 +432,11 @@ void setup() {
         // Init display
         u8g2.begin();
         drawBoot();
+        //DHT22 init
+          dht.begin();
 
 
-        // Init Pressure/Temperature sensor
-        if (!bme.begin(0x76)) {
-                DEBUG_SERIAL.println("Could not find a valid BME280 sensor, check wiring!");
-        }
+        
 
         // Init filesystem
         if (!SPIFFS.begin()) {
